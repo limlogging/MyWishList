@@ -9,37 +9,10 @@ import UIKit
 import CoreData
 
 class ViewController: UIViewController {
+    var currentProduct: Product?    //현재 상품이 저장되는 변수
+    //코어데이터 사용을 위한 설정
     var persistentContainer: NSPersistentContainer? {
         (UIApplication.shared.delegate as? AppDelegate)?.persistentContainer
-    }
-    
-    // currentProduct가 set되면, imageView. titleLabel, descriptionLabel, priceLabel에 각각 적절한 값을 지정합니다.
-    private var currentProduct: ProductsManager? = nil {
-        didSet {
-            guard let currentProduct = self.currentProduct else { return }
-            
-            //메인 스레드에서 UI 업데이트를 수행
-            DispatchQueue.main.async {
-                self.productImageView.image = nil
-                self.productTitleLabel.text = currentProduct.title
-                self.productDescriptionLabel.text = currentProduct.description
-                self.productPriceLabel.text = "\(currentProduct.price)$"
-            }
-            
-            // 백그라운드 스레드에서 제품의 섬네일 이미지를 비동기적으로 가져오기
-            DispatchQueue.global().async { [weak self] in
-                // 제품의 섬네일 이미지 데이터를 가져와 UIImage로 변환
-                if let thumbnailURL = URL(string: currentProduct.thumbnail), // 문자열을 URL로 변환
-                   let data = try? Data(contentsOf: thumbnailURL), // URL로 데이터 가져오기
-                    let image = UIImage(data: data) {
-                    
-                    // 가져온 이미지를 메인 스레드에서 productImageView에 설정하여 이미지 출력
-                    DispatchQueue.main.async {
-                        self?.productImageView.image = image
-                    }
-                }
-            }
-        }
     }
     
     @IBOutlet weak var productImageView: UIImageView!
@@ -51,12 +24,16 @@ class ViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        self.getData()
+        self.getData(completionHandler: { product in
+            self.currentProduct = product
+        })
     }
     
     // MARK: - 다른 상품 보기 버튼 선택
     @IBAction func otherProductButtonTapped(_ sender: UIButton) {
-        self.getData()
+        self.getData(completionHandler: { product in
+            self.currentProduct = product
+        })
     }
     
     // MARK: - 위시 리스트 담기 버튼 선택
@@ -105,28 +82,52 @@ class ViewController: UIViewController {
         }
     }
     
-    func getData() {
+    //비동기적으로 실행되는 urlsession이 끝나면 데이터를 저장하기 위한 콜백함수 사용
+    func getData(completionHandler: @escaping (Product?) -> Void) {
         let productID: Int = Int.random(in: 1...100)
-   
-        if let url = URL(string: "https://dummyjson.com/products/\(productID)") {
-            print("url: \(url)")
-            
-            //URLSessionDataTask를 사용하여 비동기적으로 데이터 요청
-            let task = URLSession.shared.dataTask(with: url) { (data, response, error) in
-                if let error = error {
-                    print("Error: \(error)")
-                } else if let data = data {
-                    do {
-                        let product = try JSONDecoder().decode(ProductsManager.self, from: data)
-                        self.currentProduct = product   //데이터 설정
-                        
-                    } catch {
-                        print("Decode Error: \(error)")
+        
+        //1. url 구조체 만들어주기
+        guard let url = URL(string: "https://dummyjson.com/products/\(productID)") else {
+            print("URL 주소를 불러오는데 실패했습니다.")
+            completionHandler(nil)
+            return
+        }
+        print("url: \(url)")
+        
+        //2. session 만들기
+        let session = URLSession.shared
+        
+        //3. 비동기적으로 데이터 요청 테스크 생성
+        let task = session.dataTask(with: url) { (data, response, error) in
+            guard error == nil else {
+                print("Error: \(error!)")
+                completionHandler(nil)
+                return
+            }
+            guard let data = data else {
+                completionHandler(nil)
+                return
+            }
+            do {
+                let product = try JSONDecoder().decode(Product.self, from: data)
+                completionHandler(product)
+                
+                if let thumbnailURL = URL(string: product.thumbnail),
+                   let imageData = try? Data(contentsOf: thumbnailURL) {
+                    //화면을 다시그릴때는 메인큐에서 작업 
+                    DispatchQueue.main.async {
+                        self.productPriceLabel.text = String(product.price)
+                        self.productTitleLabel.text = product.title
+                        self.productDescriptionLabel.text = product.description
+                        self.productImageView.image = UIImage(data: imageData)
                     }
                 }
+            } catch {
+                print("Decode Error: \(error)")
             }
-            task.resume()
         }
+        //4. 작업 시작
+        task.resume()
     }
 }
 

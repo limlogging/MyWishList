@@ -1,5 +1,5 @@
 //
-//  ProductsManager.swift
+//  Products.swift
 //  MyWishList
 //
 //  Created by imhs on 4/15/24.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct ProductsManager: Codable {
+struct Product: Codable {
     var id: Int
     var title: String
     var description: String
