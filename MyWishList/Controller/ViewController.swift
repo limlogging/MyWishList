@@ -15,6 +15,7 @@ class ViewController: UIViewController {
         (UIApplication.shared.delegate as? AppDelegate)?.persistentContainer
     }
     
+    @IBOutlet weak var productScrollView: UIScrollView!
     @IBOutlet weak var productImageView: UIImageView!
     @IBOutlet weak var productPriceLabel: UILabel!
     @IBOutlet weak var productTitleLabel: UILabel!
@@ -27,6 +28,19 @@ class ViewController: UIViewController {
         self.getData(completionHandler: { product in
             self.currentProduct = product
         })
+        
+        self.productScrollView.refreshControl = UIRefreshControl()
+        self.productScrollView.refreshControl?.addTarget(self, action: #selector(refresh), for: .valueChanged)
+    }
+    
+    //새로고침 추가 
+    @objc func refresh() {
+        self.getData { product in
+            self.currentProduct = product
+            DispatchQueue.main.async {
+                self.productScrollView.refreshControl?.endRefreshing()
+            }
+        }
     }
     
     // MARK: - 다른 상품 보기 버튼 선택
@@ -108,19 +122,40 @@ class ViewController: UIViewController {
                 completionHandler(nil)
                 return
             }
+            guard let response = response as? HTTPURLResponse, (200...299).contains(response.statusCode) else {
+                //에러 등 기타 처리
+                return
+            }
+            
             do {
                 let product = try JSONDecoder().decode(Product.self, from: data)
                 completionHandler(product)
                 
-                if let thumbnailURL = URL(string: product.thumbnail),
-                   let imageData = try? Data(contentsOf: thumbnailURL) {
-                    //화면을 다시그릴때는 메인큐에서 작업 
-                    DispatchQueue.main.async {
-                        self.productPriceLabel.text = String(product.price)
-                        self.productTitleLabel.text = product.title
-                        self.productDescriptionLabel.text = product.description
-                        self.productImageView.image = UIImage(data: imageData)
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .decimal
+                let dollarPriceText = "$ " + (formatter.string(from: product.price as NSNumber) ?? "")
+                let wonPriceText = "￦ " + (formatter.string(from: product.price * 1400 as NSNumber) ?? "")
+                
+                DispatchQueue.main.async {
+                    self.productPriceLabel.text = "\(dollarPriceText) (\(wonPriceText))"
+                    self.productTitleLabel.text = product.title
+                    self.productDescriptionLabel.text = product.description
+                }
+                                
+                //이미지 작업과 같은 내용은 오래걸리기때문에 새로 요청
+                //연속된 요청을 해야할때 복잡한 코드가 됨
+                if let thumbnailURL = URL(string: product.thumbnail) {
+                    let imageRequest = URLRequest(url: thumbnailURL)
+                    let imageTask = URLSession.shared.dataTask(with: imageRequest) { data, response, error in
+                        if let data = data {
+                            //화면을 다시그릴때는 메인큐에서 작업
+                            DispatchQueue.main.async {
+                                let image = UIImage(data: data)
+                                self.productImageView.image = image
+                            }
+                        }
                     }
+                    imageTask.resume()
                 }
             } catch {
                 print("Decode Error: \(error)")
